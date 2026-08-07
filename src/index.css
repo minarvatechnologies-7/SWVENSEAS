@@ -1,0 +1,157 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #f1f5f9;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ===== SIDEBAR ===== */
+.sidebar {
+  width: 260px;
+  background: #0f172a;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow-y: auto;
+  height: 100vh;
+  position: relative;
+  z-index: 99;
+}
+
+/* Mobile overlay */
+.mobile-overlay {
+  display: none;
+}
+
+/* Hamburger — hidden on desktop */
+.hamburger {
+  display: none !important;
+}
+
+/* ===== MOBILE ===== */
+@media (max-width: 768px) {
+  /* Sidebar — off-screen by default on mobile */
+  .sidebar {
+    position: fixed;
+    left: -260px;
+    top: 0;
+    bottom: 0;
+    transition: left 0.28s ease;
+    box-shadow: none;
+  }
+
+  /* Sidebar open state */
+  .sidebar.sidebar-open {
+    left: 0;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.4);
+  }
+
+  /* Show overlay on mobile when sidebar open */
+  .mobile-overlay {
+    display: block !important;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 98;
+  }
+
+  /* Show hamburger on mobile */
+  .hamburger {
+    display: flex !important;
+  }
+
+  /* Page padding smaller */
+  .page-content {
+    padding: 12px !important;
+  }
+
+  /* Tables scroll horizontally */
+  .table-wrap {
+    overflow-x: auto;
+  }
+
+  /* 2-col KPI on mobile */
+  .kpi-4 {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  /* 1-col grids on mobile */
+  .grid-2, .grid-3 {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .kpi-4 {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .header-search { display: none; }
+  /* Hide portal + supabase status text on small screens */
+  .header-meta { display: none !important; }
+}
+
+@media (max-width: 768px) {
+  /* Tighter header padding on mobile */
+  .top-header { padding: 0 12px !important; }
+  /* Shrink long company name so it doesn't push other items off-screen */
+  .header-company {
+    font-size: 11px !important;
+    max-width: 150px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Dashboard grids stack to 1 column */
+  .dash-grid-auto, .dash-grid-2 {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ===== PRINT (used by Invoices, and reusable for other printable docs) ===== */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  .no-print { display: none !important; }
+  .print-copy { page-break-after: always; }
+  .print-copy:last-child { page-break-after: auto; }
+  @page { size: A4; margin: 0; }
+  .invoice-pages { background: none !important; padding: 0 !important; gap: 0 !important; display: block !important; }
+  .invoice-pages .print-copy { width: 100% !important; box-shadow: none !important; border-radius: 0 !important; }
+}
+
+/* A4-sized page preview on screen */
+.invoice-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  background: #f1f5f9;
+  padding: 20px;
+  border-radius: 12px;
+}
+.invoice-pages .print-copy {
+  width: 210mm;
+  min-height: 297mm;
+  padding: 10mm;
+  box-sizing: border-box;
+  background: #fff;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+  border-radius: 4px;
+}
