@@ -93,11 +93,48 @@ export default function Banking() {
 
     const fromAcc = accounts.find(a=>a.id===transfer.from_account);
     const toAcc   = accounts.find(a=>a.id===transfer.to_account);
+    if (!fromAcc || !toAcc) { showMsg("❌ Account not found"); setSaving(false); return; }
     const amt     = parseFloat(transfer.amount);
     const transferRef = "TRF-" + Date.now();
-    if (transfer.editIds && transfer.editIds.length) { for (const id of transfer.editIds) await supabase.from("ledger").update({deleted_at:new Date().toISOString()}).eq("id", id); }
-    await supabase.from("ledger").insert({ entry_date: transfer.transfer_date, description: `Transfer to ${toAcc?.account_name}`, payee: toAcc?.account_name||"", type: "Debits (Payouts)", category: "Account Transfer", amount: amt, payment_mode: fromAcc?.account_name||"", bank_account_id: transfer.from_account, ref_voucher: transferRef, remarks: transfer.notes });
-    await supabase.from("ledger").insert({ entry_date: transfer.transfer_date, description: `Transfer from ${fromAcc?.account_name}`, payee: fromAcc?.account_name||"", type: "Credits (Income)", category: "Account Transfer", amount: amt, payment_mode: toAcc?.account_name||"", bank_account_id: transfer.to_account, ref_voucher: transferRef, remarks: transfer.notes });
+    const realId = (id) => (typeof id === "string" && id.startsWith("account-")) ? null : id;
+    if (transfer.editIds && transfer.editIds.length) {
+      const now = new Date().toISOString();
+      for (const id of transfer.editIds) await supabase.from("ledger").update({deleted_at: now}).eq("id", id);
+    }
+    // Always write BOTH legs with matching amount, payment_mode = account name,
+    // and bank_account_id = real UUID (null for fallback ids). Same ref_voucher.
+    const { error: e1 } = await supabase.from("ledger").insert({
+      entry_date: transfer.transfer_date,
+      description: `Transfer to ${toAcc.account_name}`,
+      payee: toAcc.account_name,
+      type: "Debits (Payouts)",
+      category: "Account Transfer",
+      amount: amt,
+      payment_mode: fromAcc.account_name,
+      bank_account_id: realId(transfer.from_account),
+      ref_voucher: transferRef,
+      remarks: transfer.notes || "",
+    });
+    if (e1) { showMsg("❌ Transfer debit failed: " + e1.message); setSaving(false); return; }
+    const { error: e2 } = await supabase.from("ledger").insert({
+      entry_date: transfer.transfer_date,
+      description: `Transfer from ${fromAcc.account_name}`,
+      payee: fromAcc.account_name,
+      type: "Credits (Income)",
+      category: "Account Transfer",
+      amount: amt,
+      payment_mode: toAcc.account_name,
+      bank_account_id: realId(transfer.to_account),
+      ref_voucher: transferRef,
+      remarks: transfer.notes || "",
+    });
+    if (e2) {
+      // Roll back debit leg so we never leave an unpaired transfer
+      await supabase.from("ledger").update({ deleted_at: new Date().toISOString() }).eq("ref_voucher", transferRef);
+      showMsg("❌ Transfer credit failed: " + e2.message);
+      setSaving(false);
+      return;
+    }
     logActivity(transfer.editIds?"Edited transfer":"Added transfer", `OMR ${amt.toFixed(3)}: ${fromAcc?.account_name} → ${toAcc?.account_name}`, "Banking");
     showMsg(`✅ OMR ${amt.toFixed(3)} transferred`);
     setShowTransfer(false); setTransfer(emptyTransfer());

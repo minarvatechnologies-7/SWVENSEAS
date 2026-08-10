@@ -8,6 +8,9 @@ const FALLBACK_ACCOUNTS = [
 
 const OPENING_KEY = "account_opening_balances"; // app_settings key: { accountName: balance }
 
+const norm = (s) => (s || "").trim().toLowerCase();
+const isFallbackId = (id) => typeof id === "string" && id.startsWith("account-");
+
 // Read opening-balance overrides from app_settings (works even without bank_accounts table)
 async function getOpeningOverrides() {
   try {
@@ -25,7 +28,6 @@ export async function setOpeningBalance(accountName, balance) {
   const overrides = await getOpeningOverrides();
   overrides[accountName] = parseFloat(balance) || 0;
   const value = JSON.stringify(overrides);
-  // Check if the row exists first, then insert or update accordingly
   const { data: existing, error: selErr } = await supabase
     .from("app_settings").select("key").eq("key", OPENING_KEY).maybeSingle();
   if (selErr) {
@@ -52,21 +54,65 @@ export async function getBankAccounts() {
       .is("deleted_at", null)
       .order("account_name");
     if (error || !data || data.length === 0) {
-      return FALLBACK_ACCOUNTS.map(a => ({ ...a, opening_balance: overrides[a.account_name] ?? a.opening_balance }));
+      return FALLBACK_ACCOUNTS.map(a => ({
+        ...a,
+        opening_balance: overrides[a.account_name] ?? a.opening_balance,
+      }));
     }
     // Deduplicate by account_name — keep only first occurrence of each name
     const seen = new Set();
     const unique = data.filter(a => {
-      const key = (a.account_name || "").trim().toLowerCase();
+      const key = norm(a.account_name);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
-    return unique.map(a => ({ ...a, opening_balance: overrides[a.account_name] ?? a.opening_balance }));
+    // Prefer the DB opening_balance for real accounts. app_settings overrides
+    // were a fallback when the bank_accounts table did not exist; applying them
+    // on top of real rows (especially with value 0) was wiping legitimate openings.
+    return unique.map(a => ({
+      ...a,
+      opening_balance: a.opening_balance != null && a.opening_balance !== ""
+        ? parseFloat(a.opening_balance)
+        : parseFloat(overrides[a.account_name] ?? 0),
+    }));
   } catch {
-    return FALLBACK_ACCOUNTS.map(a => ({ ...a, opening_balance: overrides[a.account_name] ?? a.opening_balance }));
+    return FALLBACK_ACCOUNTS.map(a => ({
+      ...a,
+      opening_balance: overrides[a.account_name] ?? a.opening_balance,
+    }));
   }
+}
 
+/**
+ * Attribute a ledger row to exactly one account:
+ * 1. If bank_account_id is set and matches this account → match
+ * 2. Else if bank_account_id is set but points at a *different* known account → no match
+ * 3. Else (no bank_account_id) → match by payment_mode name
+ *
+ * Using OR(payment_mode, bank_id) double-counted rows where payment_mode said
+ * "Deepu A/c" but bank_account_id pointed at "Deepu(Company A/c)".
+ */
+function rowMatchesAccount(r, acc, knownIds) {
+  const bid = r.bank_account_id;
+  if (bid && !isFallbackId(bid)) {
+    if (bid === acc.id) return true;
+    // Points at some other real account — do not also match by name
+    if (knownIds.has(bid)) return false;
+  }
+  return norm(r.payment_mode) === norm(acc.account_name);
+}
+
+function applyLedgerToBalance(opening, ledger, acc, knownIds) {
+  let credit = 0, debit = 0;
+  for (const r of ledger) {
+    if (!rowMatchesAccount(r, acc, knownIds)) continue;
+    const amt = parseFloat(r.amount || 0);
+    if (r.type === "Credits (Income)") credit += amt;
+    else if (r.type === "Debits (Payouts)") debit += amt;
+    // ignore unknown types
+  }
+  return parseFloat((opening + credit - debit).toFixed(3));
 }
 
 export async function createLedgerEntry({
@@ -95,7 +141,7 @@ export async function createLedgerEntry({
       category,
       amount: parseFloat(amount),
       payment_mode: account.account_name,
-      bank_account_id: (typeof bank_account_id === "string" && bank_account_id.startsWith("account-")) ? null : bank_account_id,
+      bank_account_id: isFallbackId(bank_account_id) ? null : bank_account_id,
       site: site || "",
       project_id: project_id || null,
       ref_voucher: ref_voucher || "",
@@ -109,73 +155,34 @@ export async function createLedgerEntry({
 export async function getAccountBalance(bank_account_id) {
   if (!bank_account_id) return 0;
   try {
-    // Get account name + opening balance
-    let accountName = "";
-    let opening = 0;
-    const overrides = await getOpeningOverrides();
-
-    if (typeof bank_account_id === "string" && bank_account_id.startsWith("account-")) {
-      const acc = FALLBACK_ACCOUNTS.find(a => a.id === bank_account_id);
-      accountName = acc?.account_name || "";
-      opening = parseFloat(overrides[accountName] ?? acc?.opening_balance ?? 0);
-    } else {
-      const { data: acc } = await supabase.from("bank_accounts").select("opening_balance, account_name").eq("id", bank_account_id).single();
-      accountName = acc?.account_name || "";
-      opening = parseFloat(overrides[accountName] ?? acc?.opening_balance ?? 0);
-    }
-
-    if (!accountName) return 0;
-
-    const data = await fetchAllRows((from, to) =>
-      supabase.from("ledger").select("type, amount, payment_mode, bank_account_id").is("deleted_at", null).range(from, to)
-    );
-    if (!data || data.length === 0) return opening;
-
-    // EXACT MATCH: only entries where payment_mode matches this account name
-    // (case/whitespace-insensitive, in case of duplicate accounts with slightly
-    // different name casing/spacing) OR bank_account_id matches this account's DB id
-    const norm = (s) => (s || "").trim().toLowerCase();
-    const entries = data.filter(r =>
-      norm(r.payment_mode) === norm(accountName) ||
-      (bank_account_id && !bank_account_id.startsWith("account-") && r.bank_account_id === bank_account_id)
-    );
-
-    const credits = entries.filter(r => r.type === "Credits (Income)").reduce((s, r) => s + parseFloat(r.amount || 0), 0);
-    const debits  = entries.filter(r => r.type === "Debits (Payouts)").reduce((s, r) => s + parseFloat(r.amount || 0), 0);
-    return parseFloat((opening + credits - debits).toFixed(3));
+    const { accounts, balances } = await getAccountsWithBalances();
+    if (balances[bank_account_id] != null) return balances[bank_account_id];
+    // Fallback path if id not in active list
+    const acc = accounts.find(a => a.id === bank_account_id);
+    if (!acc) return 0;
+    return balances[acc.id] ?? 0;
   } catch {
     return 0;
   }
 }
 
 // ── BATCHED: get all accounts + their balances in ONE pass ──
-// Fetches accounts, overrides, and ledger ONCE (not per-account).
-// Uses the SAME exact-match OR logic as getAccountBalance, in memory.
-// Returns { accounts: [...], balances: { id: balance } }
 export async function getAccountsWithBalances() {
-  const norm = (s) => (s || "").trim().toLowerCase();
-  const [overrides, accounts, ledger] = await Promise.all([
-    getOpeningOverrides(),
+  const [accounts, ledger] = await Promise.all([
     getBankAccounts(),
     fetchAllRows((from, to) =>
       supabase.from("ledger").select("type, amount, payment_mode, bank_account_id").is("deleted_at", null).range(from, to)
     ),
   ]);
 
+  const knownIds = new Set(
+    accounts.filter(a => a.id && !isFallbackId(a.id)).map(a => a.id)
+  );
+
   const balances = {};
   for (const acc of accounts) {
-    const name = acc.account_name;
-    const opening = parseFloat(overrides[name] ?? acc.opening_balance ?? 0);
-    const isRealId = acc.id && !String(acc.id).startsWith("account-");
-    // EXACT MATCH (same as getAccountBalance): payment_mode === name OR bank_account_id === id
-    let credit = 0, debit = 0;
-    for (const r of ledger) {
-      const match = norm(r.payment_mode) === norm(name) || (isRealId && r.bank_account_id === acc.id);
-      if (!match) continue;
-      const amt = parseFloat(r.amount || 0);
-      if (r.type === "Credits (Income)") credit += amt; else debit += amt;
-    }
-    balances[acc.id] = parseFloat((opening + credit - debit).toFixed(3));
+    const opening = parseFloat(acc.opening_balance ?? 0);
+    balances[acc.id] = applyLedgerToBalance(opening, ledger || [], acc, knownIds);
   }
   return { accounts, balances };
 }
