@@ -112,7 +112,6 @@ export function calcPayrollRow(emp, period, allAttendance, allPayroll, allPaymen
   // Find ALL payroll records for this employee+period (handles historical duplicates gracefully)
   const allPrForPeriod = allPayroll.filter(p => p.employee_id === emp.id && p.period_start === period.start);
   const pr = allPrForPeriod[0] || null; // primary record (most recently created = first in sort)
-  const allPrIds = allPrForPeriod.map(p => p.id); // all record IDs including any duplicates
 
   const advance   = parseFloat(pr?.advance_deduction || 0);
   const food      = parseFloat(pr?.food_deduction    || 0);
@@ -133,17 +132,18 @@ export function calcPayrollRow(emp, period, allAttendance, allPayroll, allPaymen
   // Total amount due = net salary + opening balance
   const totalAmount = parseFloat((netSalary + openingBal).toFixed(3));
 
-  // Payments: match by payroll_id (ANY payroll record for this period) OR unlinked within period
+  // Payments for this period: STRICTLY by payment_date falling inside the period.
+  // Previously we also matched by payroll_id and had a dangerous fallback to ALL
+  // unlinked payments — that caused previous-period payments (e.g. 22/23 Jul)
+  // to appear inside the next period (26 Jul – 25 Aug) reports.
+  // Attribution is now date-based only, so "Payments this Period" matches the
+  // salary cycle (26th → 25th) exactly.
   const empPayments = allPayments.filter(p => p.employee_id === emp.id);
   const periodPayments = empPayments.filter(p => {
-    if (allPrIds.length > 0 && p.payroll_id && allPrIds.includes(p.payroll_id)) return true; // linked to any record for this period
-    if (!p.payroll_id && p.payment_date >= period.start && p.payment_date <= period.end) return true; // unlinked, within period dates
-    return false;
+    const d = p.payment_date || "";
+    return d >= period.start && d <= period.end;
   });
-  // If nothing matched the period, fall back to ALL unlinked payments (same fallback as Payroll.jsx)
-  const finalPayments = periodPayments.length > 0
-    ? periodPayments
-    : empPayments.filter(p => !p.payroll_id);
+  const finalPayments = periodPayments;
 
   const paidAmt    = parseFloat(finalPayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0).toFixed(3));
 
