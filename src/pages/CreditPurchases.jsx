@@ -31,7 +31,7 @@ const statusStyle = {
 };
 
 export default function CreditPurchases() {
-  const { isAdmin, setShowLogin, confirmAction } = useAdmin();
+  const { isAdmin, setShowLogin, confirmAction, logActivity } = useAdmin();
   const [purchases, setPurchases]   = useState([]);
   const [payments, setPayments]     = useState([]);
   const [loading, setLoading]       = useState(true);
@@ -55,8 +55,8 @@ export default function CreditPurchases() {
   const loadAll = async () => {
     setLoading(true);
     const [p, py] = await Promise.all([
-      supabase.from("credit_purchases").select("*").order("purchase_date", { ascending: false }),
-      supabase.from("credit_payments").select("*").order("payment_date", { ascending: false }),
+      supabase.from("credit_purchases").select("*").is("deleted_at", null).order("purchase_date", { ascending: false }),
+      supabase.from("credit_payments").select("*").is("deleted_at", null).order("payment_date", { ascending: false }),
     ]);
     setPurchases(p.data || []);
     setPayments(py.data || []);
@@ -146,9 +146,11 @@ export default function CreditPurchases() {
 
   const deletePurchase = (id) => {
     if (!isAdmin) { setShowLogin(true); return; }
-    confirmAction("Delete this entry and all its payments?", async () => {
-      await supabase.from("credit_payments").delete().eq("purchase_id", id);
-      await supabase.from("credit_purchases").delete().eq("id", id);
+    confirmAction("Move this entry and all its payments to Trash?", async () => {
+      const now = new Date().toISOString();
+      await supabase.from("credit_payments").update({ deleted_at: now }).eq("purchase_id", id).is("deleted_at", null);
+      await supabase.from("credit_purchases").update({ deleted_at: now }).eq("id", id);
+      logActivity("Moved credit purchase to Trash", id, "Credit Purchases");
       await loadAll();
     });
   };

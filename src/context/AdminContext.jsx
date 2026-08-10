@@ -97,8 +97,12 @@ export function AdminProvider({ children }) {
         setLoggedIn(true);
         setShowLogin(false);
         sessionStorage.setItem("minarva_user", JSON.stringify(user));
-        // Update last_login
-        supabase.from("app_users").update({ last_login: new Date().toISOString() }).eq("id", data.id).then(()=>{});
+        // Update last_login; if password was still plaintext, migrate to bcrypt now
+        const updates = { last_login: new Date().toISOString() };
+        if (typeof data.password === "string" && !data.password.startsWith("$2")) {
+          updates.password = bcrypt.hashSync(password, 10);
+        }
+        supabase.from("app_users").update(updates).eq("id", data.id).then(()=>{});
         return true;
       }
     } catch {}

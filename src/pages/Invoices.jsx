@@ -260,7 +260,7 @@ export default function Invoices() {
     let invId=editId;
     if(editId){
       await supabase.from("invoices").update(row).eq("id",editId);
-      await supabase.from("invoice_line_items").delete().eq("invoice_id",editId);
+      await supabase.from("invoice_line_items").update({deleted_at:new Date().toISOString()}).eq("invoice_id",editId).is("deleted_at",null);
     } else {
       const {data}=await supabase.from("invoices").insert(row).select().single();
       invId=data?.id;
@@ -299,7 +299,7 @@ export default function Invoices() {
     setEditId(inv.id); setShowForm(true);
   };
 
-  const deleteInv=(inv)=>{confirmAction(`Move invoice ${inv.invoice_number} to Trash? You can restore it later from the Trash page.`,async()=>{await supabase.from("invoices").update({deleted_at:new Date().toISOString()}).eq("id",inv.id);logActivity("Moved invoice to Trash",inv.invoice_number,"Invoices");showMsg("✅ Moved to Trash");await load();});};
+  const deleteInv=(inv)=>{confirmAction(`Move invoice ${inv.invoice_number} to Trash? You can restore it later from the Trash page.`,async()=>{const now=new Date().toISOString();await supabase.from("invoice_line_items").update({deleted_at:now}).eq("invoice_id",inv.id).is("deleted_at",null);await supabase.from("invoices").update({deleted_at:now}).eq("id",inv.id);logActivity("Moved invoice to Trash",inv.invoice_number,"Invoices");showMsg("✅ Moved to Trash");await load();});};
 
   const printInvoice=(inv)=>{setPreview(inv);setPrintMode("both");};
   const doPrint=(mode)=>{setPrintMode(mode);setTimeout(()=>{window.print();},100);};

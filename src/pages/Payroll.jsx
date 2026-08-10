@@ -6,7 +6,7 @@ import BankAccountSelect from "../components/BankAccountSelect";
 import { getBankAccounts, createLedgerEntry } from "../lib/bankAccounts";
 import { getGroups, saveGroups } from "../lib/groups";
 
-import { WORK_HOURS, getPeriodDates, getCurrentPeriod, getSalaryPeriods, calcPayrollRow } from "../lib/payrollUtils";
+import { WORK_HOURS, getPeriodDates, getCurrentPeriod, getSalaryPeriods, getPeriodForDate, calcPayrollRow } from "../lib/payrollUtils";
 
 // Escape user-controlled text before putting it into print HTML (prevents XSS
 // via employee name, payment notes, company name, etc.)
@@ -769,8 +769,21 @@ export default function Payroll() {
       return;
     }
     const emp = employees.find(e => e.id === payForm.employee_id);
-    const calc = calcPayroll(emp);
-    let prId = calc.payrollRecord?.id;
+    const companyAccId = (bankAccounts.find(a => (a.account_name||"").trim().toLowerCase() === "company account") || {}).id || null;
+    // Link payment to the salary period that matches payment_date (26th→25th cycle),
+    // NOT necessarily the period currently selected in the UI. This keeps
+    // payroll_id consistent with how calcPayrollRow attributes payments by date.
+    const payPeriod = getPeriodForDate(payForm.payment_date);
+    if (payPeriod.start !== selectedPeriod.start) {
+      const ok = window.confirm(
+        `Payment date ${payForm.payment_date} belongs to period ${payPeriod.label}, ` +
+        `but you are viewing ${selectedPeriod.label}.\n\n` +
+        `The payment will be recorded against ${payPeriod.label}. Continue?`
+      );
+      if (!ok) { setSaving(false); return; }
+    }
+    const calcForPeriod = calcPayrollRow(emp, payPeriod, attendance, payrollRecords, payments, companyAccId);
+    let prId = calcForPeriod.payrollRecord?.id;
     if (!prId) {
       // Query database directly to prevent duplicate records — stale state could
       // cause a second payroll record to be created if a previous payment in the
@@ -778,17 +791,17 @@ export default function Payroll() {
       const { data: existingPr } = await supabase.from("payroll")
         .select("id")
         .eq("employee_id", payForm.employee_id)
-        .eq("period_start", selectedPeriod.start)
+        .eq("period_start", payPeriod.start)
         .is("deleted_at", null)
         .maybeSingle();
       if (existingPr) {
         prId = existingPr.id;
       } else {
         const { data: pr } = await supabase.from("payroll").insert({
-          employee_id: payForm.employee_id, period_label: selectedPeriod.label,
-          period_start: selectedPeriod.start, period_end: selectedPeriod.end,
-          total_days: calc.totalDays, total_hours: calc.totalHours,
-          gross_salary: calc.grossSalary, net_salary: calc.netSalary, status: "Pending"
+          employee_id: payForm.employee_id, period_label: payPeriod.label,
+          period_start: payPeriod.start, period_end: payPeriod.end,
+          total_days: calcForPeriod.totalDays, total_hours: calcForPeriod.totalHours,
+          gross_salary: calcForPeriod.grossSalary, net_salary: calcForPeriod.netSalary, status: "Pending"
         }).select().single();
         prId = pr?.id;
       }
@@ -801,7 +814,6 @@ export default function Payroll() {
     }).select().single();
     // Auto ledger entry
     if (payForm.bank_account_id) {
-      const emp = employees.find(e => e.id === payForm.employee_id);
       await createLedgerEntry({
         bank_account_id: payForm.bank_account_id,
         bank_accounts: bankAccounts,
@@ -815,10 +827,10 @@ export default function Payroll() {
       });
     }
     if (prId) {
-      const newPaid = calc.paidAmt + parseFloat(payForm.amount);
+      const newPaid = calcForPeriod.paidAmt + parseFloat(payForm.amount);
       await supabase.from("payroll").update({
-        paid_amount: newPaid, balance: calc.netSalary - newPaid,
-        status: (calc.netSalary - newPaid) <= 0 ? "Paid" : "Partial"
+        paid_amount: newPaid, balance: calcForPeriod.netSalary - newPaid,
+        status: (calcForPeriod.netSalary - newPaid) <= 0 ? "Paid" : "Partial"
       }).eq("id", prId);
     }
     await loadAll();

@@ -38,6 +38,24 @@ export function getSalaryPeriods() {
   return out;
 }
 
+
+// Given a YYYY-MM-DD payment/attendance date, return the salary period it belongs to
+// (26th of month → 25th of next month).
+export function getPeriodForDate(dateStr) {
+  if (!dateStr) return getCurrentPeriod();
+  const [y, m, d] = dateStr.split("-").map(Number); // m is 1-based
+  if (d >= 26) {
+    // Period starts this month (month index = m-1)
+    return getPeriodDates(y, m - 1);
+  } else {
+    // Period started previous month
+    let pm = m - 2, py = y;
+    if (pm < 0) { pm = 11; py--; }
+    return getPeriodDates(py, pm);
+  }
+}
+
+
 // Carry-forward anchor: the FIRST period whose opening balance comes from
 // emp.opening_balance. For every period AFTER this, the opening balance is
 // auto-calculated as the previous period's closing balance. Periods BEFORE
