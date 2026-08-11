@@ -169,19 +169,22 @@ export default function Dashboard({ setPage }) {
     <div style={{ padding: 24 }}>
       {/* Hero Banner */}
       <div style={{ background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#1e4080 100%)", borderRadius: 14, padding: "28px 32px", marginBottom: 24, position: "relative", overflow: "hidden" }}>
-        <div style={{ position: "absolute", top: 0, right: 0, width: 300, height: "100%", background: "radial-gradient(circle at 80% 50%,rgba(59,130,246,0.15) 0%,transparent 70%)" }} />
+        {/* Decorative glow — must not capture taps on mobile (it covers most of the banner on narrow screens) */}
+        <div style={{ position: "absolute", top: 0, right: 0, width: 300, height: "100%", background: "radial-gradient(circle at 80% 50%,rgba(59,130,246,0.15) 0%,transparent 70%)", pointerEvents: "none" }} />
+        <div style={{ position: "relative", zIndex: 1 }}>
         <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, letterSpacing: 2, marginBottom: 8 }}>SEVENSEAS MODERN ENTERPRISES OPERATIONS</div>
         <div style={{ fontSize: 28, fontWeight: 800, color: "#fff", marginBottom: 8 }}>Comprehensive Frontboard Dashboard</div>
         <div style={{ fontSize: 13, color: "#94a3b8", maxWidth: 560, marginBottom: 20 }}>Real-time visual reports of civil contracts, Omani Rial (OMR) ledgers, subcontractor commitments, payroll registers, and referral commission accounts.</div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button onClick={() => setPage("invoices")} style={{ background: "#3b82f6", color: "#fff", border: "none", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>+ New Invoice / Qtn</button>
-          <button onClick={() => setPage("ledger")} style={{ background: "rgba(255,255,255,0.1)", color: "#e2e8f0", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Review Cashbook</button>
+          <button type="button" onClick={() => setPage && setPage("invoices")} style={{ background: "#3b82f6", color: "#fff", border: "none", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer", WebkitTapHighlightColor: "transparent" }}>+ New Invoice / Qtn</button>
+          <button type="button" onClick={() => setPage && setPage("ledger")} style={{ background: "rgba(255,255,255,0.1)", color: "#e2e8f0", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer", WebkitTapHighlightColor: "transparent" }}>Review Cashbook</button>
           {!installed && (
-            <button onClick={installApp} style={{ background: "rgba(99,102,241,0.9)", color: "#fff", border: "1px solid #818cf8", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>⬇ Install App</button>
+            <button type="button" onClick={installApp} style={{ background: "rgba(99,102,241,0.9)", color: "#fff", border: "1px solid #818cf8", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer", WebkitTapHighlightColor: "transparent" }}>⬇ Install App</button>
           )}
           {installed && (
             <div style={{ background: "rgba(16,185,129,0.2)", color: "#34d399", border: "1px solid #34d399", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600 }}>✅ App Installed</div>
           )}
+        </div>
         </div>
       </div>
 
