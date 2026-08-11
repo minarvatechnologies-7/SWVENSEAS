@@ -55,6 +55,8 @@ export default function Projects() {
   const [editProject, setEditProject] = useState(null);
   const [editProjForm, setEditProjForm] = useState({});
   const [showSchedForm, setShowSchedForm] = useState(false);
+  const [editingSchedId, setEditingSchedId] = useState(null);
+  const [editSched, setEditSched] = useState({label:"",amount:""});
 
   useEffect(()=>{ loadProjects(); },[]);
 
@@ -69,6 +71,12 @@ export default function Projects() {
   };
 
   const selProj = projects.find(p=>p.id===selected?.id);
+
+  useEffect(() => {
+    setEditingSchedId(null);
+    setEditSched({label:"",amount:""});
+    setShowAddSched(false);
+  }, [selected?.id]);
 
   const addProject = async () => {
     if(!isAdmin){setShowLogin(true);return;}
@@ -117,6 +125,49 @@ export default function Projects() {
       logActivity("Moved payment schedule to Trash", `${selProj?.name} — ${label}`, "Projects");
       await loadProjects();
     });
+  };
+
+  const startEditSchedule = (s) => {
+    if(!isAdmin){setShowLogin(true);return;}
+    setEditingSchedId(s.id);
+    setEditSched({label: s.label || "", amount: String(s.amount ?? "")});
+  };
+
+  const cancelEditSchedule = () => {
+    setEditingSchedId(null);
+    setEditSched({label:"",amount:""});
+  };
+
+  const saveEditSchedule = async () => {
+    if(!isAdmin){setShowLogin(true);return;}
+    if(!editingSchedId) return;
+    const label = (editSched.label || "").trim();
+    const amount = parseFloat(editSched.amount);
+    if(!label || isNaN(amount) || amount < 0) return;
+    const existing = selProj?.schedules?.find(s=>s.id===editingSchedId);
+    const received = parseFloat(existing?.received || 0);
+    if(amount < received) {
+      confirmAction(
+        `New amount (OMR ${amount.toFixed(3)}) is less than already received (OMR ${received.toFixed(3)}). Save anyway?`,
+        async () => {
+          setSaving(true);
+          await supabase.from("schedules").update({label, amount}).eq("id", editingSchedId);
+          logActivity("Edited payment schedule", `${selProj?.name} — ${label} — OMR ${amount.toFixed(3)}`, "Projects");
+          setEditingSchedId(null);
+          setEditSched({label:"",amount:""});
+          await loadProjects();
+          setSaving(false);
+        }
+      );
+      return;
+    }
+    setSaving(true);
+    await supabase.from("schedules").update({label, amount}).eq("id", editingSchedId);
+    logActivity("Edited payment schedule", `${selProj?.name} — ${label} — OMR ${amount.toFixed(3)}`, "Projects");
+    setEditingSchedId(null);
+    setEditSched({label:"",amount:""});
+    await loadProjects();
+    setSaving(false);
   };
 
   const updateWorkCompleted = async (schedId, val) => {
@@ -308,10 +359,21 @@ export default function Projects() {
                     const received=parseFloat(s.received||0);
                     const amount=parseFloat(s.amount||0);
                     const balance=amount-received;
+                    const isEditing = editingSchedId === s.id;
                     return (
-                      <tr key={s.id||i} style={{borderTop:"1px solid #f1f5f9",background:s.work_completed&&balance>0?"#fffbeb":s.work_completed&&balance<=0?"#f0fdf4":"#fff"}}>
-                        <td style={{padding:"10px 12px",color:"#1e293b",fontWeight:500,maxWidth:180}}>{s.label}</td>
-                        <td style={{padding:"10px 12px",color:"#475569"}}>{amount.toFixed(3)}</td>
+                      <tr key={s.id||i} style={{borderTop:"1px solid #f1f5f9",background:isEditing?"#eef2ff":s.work_completed&&balance>0?"#fffbeb":s.work_completed&&balance<=0?"#f0fdf4":"#fff"}}>
+                        <td style={{padding:"10px 12px",color:"#1e293b",fontWeight:500,maxWidth:220}}>
+                          {isEditing
+                            ? <input value={editSched.label} onChange={e=>setEditSched({...editSched,label:e.target.value})}
+                                style={{width:"100%",border:"1px solid #6366f1",borderRadius:6,padding:"6px 8px",fontSize:12,outline:"none",boxSizing:"border-box"}} />
+                            : s.label}
+                        </td>
+                        <td style={{padding:"10px 12px",color:"#475569"}}>
+                          {isEditing
+                            ? <input type="number" step="0.001" min="0" value={editSched.amount} onChange={e=>setEditSched({...editSched,amount:e.target.value})}
+                                style={{width:100,border:"1px solid #6366f1",borderRadius:6,padding:"6px 8px",fontSize:12,outline:"none"}} />
+                            : amount.toFixed(3)}
+                        </td>
                         <td style={{padding:"10px 12px"}}>
                           {isAdmin
                             ?<label style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}>
@@ -324,9 +386,25 @@ export default function Projects() {
                         <td style={{padding:"10px 12px",color:"#10b981",fontWeight:700}}>{received.toFixed(3)}</td>
                         <td style={{padding:"10px 12px",color:"#94a3b8",fontSize:11}}>{s.payment_date||"—"}</td>
                         <td style={{padding:"10px 12px",color:balance>0?"#f59e0b":"#10b981",fontWeight:700}}>{balance.toFixed(3)}</td>
-                        <td style={{padding:"10px 12px"}}>
+                        <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
                           {isAdmin&&(
-                            <button onClick={()=>deleteSchedule(s.id)} style={{background:"#fef2f2",color:"#ef4444",border:"none",borderRadius:6,padding:"4px 7px",cursor:"pointer",fontSize:11}}>🗑</button>
+                            isEditing ? (
+                              <span style={{display:"inline-flex",gap:4}}>
+                                <button onClick={saveEditSchedule} disabled={saving}
+                                  style={{background:"#6366f1",color:"#fff",border:"none",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:11,fontWeight:600}}>
+                                  {saving?"...":"💾"}
+                                </button>
+                                <button onClick={cancelEditSchedule}
+                                  style={{background:"#f1f5f9",color:"#64748b",border:"none",borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:11}}>✕</button>
+                              </span>
+                            ) : (
+                              <span style={{display:"inline-flex",gap:4}}>
+                                <button onClick={()=>startEditSchedule(s)} title="Edit schedule"
+                                  style={{background:"#eef2ff",color:"#6366f1",border:"none",borderRadius:6,padding:"4px 7px",cursor:"pointer",fontSize:11}}>✏️</button>
+                                <button onClick={()=>deleteSchedule(s.id)} title="Delete schedule"
+                                  style={{background:"#fef2f2",color:"#ef4444",border:"none",borderRadius:6,padding:"4px 7px",cursor:"pointer",fontSize:11}}>🗑</button>
+                              </span>
+                            )
                           )}
                         </td>
                       </tr>
