@@ -184,6 +184,20 @@ export default function Invoices() {
     setInvoices(inv.data||[]); setLineItems(li.data||[]); setSavedDescs(sd.data||[]); setLoading(false);
   };
   useEffect(()=>{load();loadCompany().then(setCompany);},[]);
+  // Dashboard "+ New Invoice / Qtn" sets this flag so we open the create form immediately.
+  useEffect(()=>{
+    try {
+      if (sessionStorage.getItem("open_new_invoice") === "1") {
+        sessionStorage.removeItem("open_new_invoice");
+        const f = emptyForm();
+        // getNextNumber is defined below; on first paint invoices may still be loading
+        try { f.invoice_number = getNextNumber(f.type); } catch (_) {}
+        setForm(f);
+        setEditId(null);
+        setShowForm(true);
+      }
+    } catch (_) {}
+  }, [invoices]);
   const showMsg=(t)=>{setMsg(t);setTimeout(()=>setMsg(""),3000);};
 
   // Previously used customers (for autocomplete + auto-fill)

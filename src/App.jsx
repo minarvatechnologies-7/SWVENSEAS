@@ -47,8 +47,17 @@ const nav = [
 ];
 
 function AppContent() {
-  const [page, setPage] = useState("dashboard");
+  const [page, setPageRaw] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const setPage = (id) => {
+    setPageRaw(id);
+    setSidebarOpen(false);
+    try { window.scrollTo(0, 0); } catch (_) {}
+    try {
+      const main = document.querySelector(".page-content");
+      if (main) main.scrollTop = 0;
+    } catch (_) {}
+  };
   const { isAdmin, currentUser, loggedIn, initialLoading, setShowLogin, logout, canView } = useAdmin();
 
   // Check if this is the employee field app
