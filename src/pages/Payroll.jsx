@@ -684,12 +684,21 @@ export default function Payroll() {
 
   const deletePayment = (id, amount, empName) => {
     if (!isAdmin) { setShowLogin(true); return; }
-    confirmAction(`Move payment of OMR ${parseFloat(amount).toFixed(3)} for ${empName} to Trash?`, async () => {
+    confirmAction(
+      `Move payment of OMR ${parseFloat(amount).toFixed(3)} for ${empName} to Trash?\n\nTip: To change the amount, use Edit (✏️) instead of Delete + re-enter — that avoids missing payments in the summary.`,
+      async () => {
       const now = new Date().toISOString();
-      await supabase.from("salary_payments").update({deleted_at:now}).eq("id", id);
+      await supabase.from("salary_payments").update({deleted_at:now}).eq("id", id).is("deleted_at", null);
       // Also remove the linked Cashbook ledger entry so the two never disagree.
       const voucher = `PAY-${(id || "").substring(0, 8).toUpperCase()}`;
       await supabase.from("ledger").update({deleted_at:now}).eq("ref_voucher", voucher).is("deleted_at", null);
+      // If this payment was open in the edit form, close it so a later Save
+      // cannot revive/update a trashed row (root cause of the MOKLAS missing-20 case).
+      if (editingPayment === id) {
+        setEditingPayment(null);
+        setShowPayForm(false);
+        setPayForm({ employee_id: "", amount: "", payment_type: "Salary", payment_date: new Date().toISOString().split("T")[0], notes: "", bank_account_id: "" });
+      }
       logActivity("Moved salary payment to Trash", `${empName} — OMR ${parseFloat(amount).toFixed(3)}`, "Payroll");
       await loadAll();
     });
@@ -703,13 +712,32 @@ export default function Payroll() {
     if (editingPayment) {
       const empName = employees.find(e=>e.id===payForm.employee_id)?.name || "";
       const oldPayment = payments.find(p=>p.id===editingPayment);
-      await supabase.from("salary_payments").update({
+      // Refuse to edit a payment that is no longer in the active list (trashed /
+      // already removed). Updating a soft-deleted row without clearing deleted_at
+      // would leave payroll totals wrong while ledger could still show the amount.
+      if (!oldPayment || oldPayment.deleted_at) {
+        alert("This payment is no longer active (it may have been moved to Trash). Close the form and record a new payment if needed.");
+        setEditingPayment(null);
+        setShowPayForm(false);
+        setSaving(false);
+        await loadAll();
+        return;
+      }
+      const { data: updatedRows, error: updateErr } = await supabase.from("salary_payments").update({
         amount: parseFloat(payForm.amount),
         payment_type: payForm.payment_type,
         payment_date: payForm.payment_date,
         notes: payForm.notes,
         bank_account_id: payForm.bank_account_id || null,
-      }).eq("id", editingPayment);
+      }).eq("id", editingPayment).is("deleted_at", null).select("id");
+      if (updateErr || !updatedRows || updatedRows.length === 0) {
+        alert("Could not save — payment may have been moved to Trash. Please refresh and try again.");
+        setEditingPayment(null);
+        setShowPayForm(false);
+        setSaving(false);
+        await loadAll();
+        return;
+      }
       // Keep the Cashbook ledger in sync. The auto-entry created at payment time
       // is tagged ref_voucher = PAY-<first 8 of payment id>. Find and update it
       // (amount/date/description), so Payroll and Ledger never disagree. If the
